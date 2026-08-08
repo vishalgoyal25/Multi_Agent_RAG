@@ -9,6 +9,10 @@ langgraph>=0.2.0
 # Pulled in by langgraph; listed explicitly so the dependency is visible rather
 # than implicit.
 langchain-core>=0.3.0
+# Durable checkpointing. MemorySaver is in-process and would be wiped by
+# `uvicorn --reload` between an interrupt and a resume, which breaks both the
+# crash-resume claim and the human-in-the-loop demo (D-14).
+langgraph-checkpoint-sqlite>=2.0.0
 
 # --- LLM access ---
 # One SDK, both providers: Groq and Cerebras expose OpenAI-compatible endpoints,
@@ -42,6 +46,10 @@ redis>=5.0.0
 # Faithfulness, answer relevancy, context precision/recall.
 ragas>=0.2.0
 datasets>=2.20.0
+# RAGAS defaults to OpenAI for both judge and embeddings; this provides the
+# wrapper used to point it at Groq instead. Already arrives as a ragas
+# dependency — listed explicitly because we depend on it directly (D-15).
+langchain-openai>=0.2.0
 
 # --- Testing / CI ---
 pytest>=8.0.0

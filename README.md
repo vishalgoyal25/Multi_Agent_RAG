@@ -1,6 +1,6 @@
 # Multi-Agent RAG Research Platform
 
-> **Status: in development (Phase 0 of 11).** Architecture and design decisions are
+> **Status: in development (Phase 1 of 11).** Architecture and design decisions are
 > settled; implementation is underway. Setup steps below are the intended commands —
 > they are verified phase by phase as each is built, and this README is finalised in
 > Phase 10 with real evaluation numbers and an honest limitations section. Progress is
@@ -26,7 +26,7 @@ step streams to the browser as it happens, rendered as an animated node graph.
               ┌────────────┼────────────┐
               v            v            v
         ┌──────────┐ ┌──────────┐ ┌──────────┐
-        │Researcher│ │Researcher│ │Researcher│   PARALLEL (asyncio.gather)
+        │Researcher│ │Researcher│ │Researcher│   PARALLEL (LangGraph Send)
         │    #1    │ │    #2    │ │    #3    │   hybrid retrieve → rerank → extract
         └────┬─────┘ └────┬─────┘ └────┬─────┘
              └────────────┼────────────┘
@@ -63,7 +63,7 @@ and variance for no benefit. Restraint here is the design, not a shortcut.
 | Multi-agent orchestration, typed shared state | LangGraph `StateGraph` |
 | Cyclic feedback loops, bounded | Critic → Researcher, max 1 revision |
 | LLM-driven routing (real agency) | Planner and Critic, via native tool calling |
-| Parallel agent execution | `asyncio.gather()` across researchers |
+| Parallel agent execution | LangGraph `Send` API (dynamic fan-out) |
 | Self-critique / reflection | Critic node |
 | Reliability | Checkpointing (resume, not restart), recursion caps, provider failover, human-in-the-loop gate |
 | Observability | Per-node tracing → SSE stream → live graph UI |
