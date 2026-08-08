@@ -1,0 +1,36 @@
+# --- Hard blocks: never un-ignore these, whatever else changes above ---
+
+# Secrets
+.env
+
+# Confidential source material — the assignment and JD PDFs are marked
+# "Confidential - for candidate use only". Never publish them.
+*.pdf
+
+# Virtual environment
+.venv/
+venv/
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+# Vector store — rebuilt by `python -m app.retrieval.index`
+chroma_db/
+# LangGraph checkpoints (local dev persistence)
+checkpoints/
+*.sqlite
+*.sqlite3
+# Traces — the format is a deliverable, so one short sample is kept
+logs/*.jsonl
+!logs/sample_trace.jsonl
+# Editor / OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+*.md
+!README.md
