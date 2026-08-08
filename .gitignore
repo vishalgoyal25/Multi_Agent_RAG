@@ -1,14 +1,18 @@
-# Secrets
+# --- Secrets ---
 .env
 
-# Confidential source material
+# --- Working documents (local only, not deliverables) ---
+CLAUDE.md
+PHASES.md
+
+# --- Confidential source material ---
 *.pdf
 
-# Virtual environment
+# --- Virtual environment ---
 .venv/
 venv/
 
-# Python
+# --- Python ---
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -16,26 +20,22 @@ __pycache__/
 .coverage
 htmlcov/
 
-# Generated retrieval artifacts — both rebuilt by `python -m app.retrieval.index`
-# from docs/. Ignored together: having one without the other is incoherent.
+# --- Generated retrieval artifacts — both rebuilt by `python -m app.retrieval.index`
+# from docs/. Ignored together: having one without the other is incoherent. ---
 data/chroma_db/
 data/chunks.json
 
-# LangGraph checkpoints (local dev persistence)
+# --- LangGraph checkpoints (local dev persistence) ---
 checkpoints/
 *.sqlite
 *.sqlite3
 
-# Traces — the format is a deliverable, so one short sample is kept
+# --- Traces — the format is a deliverable, so one short sample is kept ---
 logs/*.jsonl
 !logs/sample_trace.jsonl
 
-# Editor / OS noise
+# --- Editor / OS noise ---
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
-
-# Markdown files
-CLAUDE.md
-PHASES.md
