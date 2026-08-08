@@ -50,6 +50,13 @@ datasets>=2.20.0
 # wrapper used to point it at Groq instead. Already arrives as a ragas
 # dependency — listed explicitly because we depend on it directly (D-15).
 langchain-openai>=0.2.0
+# Workaround for a real upstream bug, not a Vertex AI integration: ragas==0.4.3
+# eagerly imports ChatVertexAI from a langchain_community path that no longer
+# exists (moved to this package by LangChain itself). ragas/llms fails to
+# import at all without it — see ragas issues #2741 and #2745. Installed only
+# so that import succeeds; nothing in this project calls Vertex AI or needs
+# Google Cloud credentials.
+langchain-google-vertexai>=2.0.0
 
 # --- Testing / CI ---
 pytest>=8.0.0
