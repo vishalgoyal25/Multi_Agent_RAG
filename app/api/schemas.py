@@ -106,5 +106,22 @@ class FinalAnswer(BaseModel):
     escalation_count: int
 
 
+class CacheHit(BaseModel):
+    """What `/ask` or `/ask/stream` return on a semantic cache hit (Phase 8,
+    D-09) — never silently merged into `FinalAnswer`'s shape. A visitor (or a
+    developer reading a response) can always tell a cached answer from a
+    freshly computed one, which is the entire point of D-09: a cache hit
+    presented as fresh work would make the trace lie about what happened.
+    No `thread_id` — a cache hit never touches the graph, so there is no run
+    to resume or approve; it was already approved once, the time it was
+    stored (only `/resume` writes to the cache, and only on approval).
+    """
+
+    status: Literal["cache_hit"] = "cache_hit"
+    answer: str
+    citations: tuple[str, ...]
+    similarity: float
+
+
 class HealthResponse(BaseModel):
     status: Literal["ok"] = "ok"

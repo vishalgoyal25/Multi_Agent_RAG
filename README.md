@@ -1,11 +1,12 @@
 # Multi-Agent RAG Research Platform
 
-> **Status: Phases 0–7 of 11 complete.** Core system (LLM client, retrieval, all four
-> agents, the graph, the API, the live UI) is built and verified against real runs — and
-> it has now been formally scored: real RAGAS evaluation numbers are below. Semantic
-> caching, CI, and containerisation/final docs are still ahead. See
-> [Progress](#progress) for the exact state of each phase and [Evaluation
-> results](#evaluation-results) for the real numbers.
+> **Status: Phases 0–8 of 11 complete.** Core system (LLM client, retrieval, all four
+> agents, the graph, the API, the live UI) is built and verified against real runs, it has
+> been formally scored with real RAGAS evaluation numbers, and it now sits behind a
+> semantic cache — a repeated or paraphrased question is served in milliseconds, with a
+> cache hit always shown as a cache hit, never as fresh work. CI and
+> containerisation/final docs are still ahead. See [Progress](#progress) for the exact
+> state of each phase and [Evaluation results](#evaluation-results) for the real numbers.
 
 A multi-agent research system that answers **complex, multi-step questions** over a
 document corpus — and shows its work live while doing it.
@@ -33,7 +34,7 @@ human-approval step, exactly as it looks in a browser.
 | 5 | API layer — FastAPI, SSE streaming, `/resume` | ✅ |
 | 6 | Live frontend — animated Cytoscape.js graph | ✅ |
 | 7 | Evaluation — real RAGAS scoring against a 6-question set | ✅ |
-| 8 | Semantic cache — Redis | ⬜ next |
+| 8 | Semantic cache — Redis | ✅ |
 | 9 | CI — pytest + GitHub Actions | ⬜ |
 | 10 | Sample transcript, containerisation, final README | ⬜ |
 
@@ -128,7 +129,7 @@ process restart, not just a hot-reload), and resumed by a separate approval call
 | API service | FastAPI + Server-Sent Events + REST `/resume` | ✅ |
 | Live animated frontend | Self-contained Cytoscape.js page, no build step | ✅ |
 | Evaluation | RAGAS — faithfulness, answer relevancy, context precision/recall, real scores above | ✅ |
-| Semantic caching | Redis, similarity-matched, cache hits visibly traced | ⬜ Phase 8 |
+| Semantic caching | Redis, similarity-matched, cache hits visibly traced in the UI | ✅ |
 | CI | `pytest` on deterministic units + GitHub Actions | ⬜ Phase 9 (tests exist and pass locally; wiring is what's left) |
 | Containerisation | Dockerfile + docker-compose | ⬜ Phase 10 |
 
@@ -146,7 +147,8 @@ process restart, not just a hot-reload), and resumed by a separate approval call
 - **Embeddings:** `sentence-transformers` / `all-MiniLM-L6-v2` (local, CPU, free)
 - **API:** FastAPI + `sse-starlette`
 - **Frontend:** Cytoscape.js, single self-contained HTML page, no build toolchain
-- **Cache (Phase 8):** Redis
+- **Cache:** Redis, plain client-side cosine similarity over cached question embeddings
+  (no vector-search module assumed)
 - **Eval:** RAGAS 0.4.3 — real scores in [Evaluation results](#evaluation-results)
 
 ---
@@ -158,8 +160,10 @@ process restart, not just a hot-reload), and resumed by a separate approval call
 - Python 3.11 or newer
 - A free [Groq](https://console.groq.com/keys) API key (primary)
 - A free [Cerebras](https://cloud.cerebras.ai) API key (failover)
-- Redis and Docker are **not required yet** — they're only needed once Phases 8 and 10
-  land.
+- A reachable Redis instance (local `docker run -d -p 6379:6379 redis` works fine) — the
+  semantic cache connects at startup and the app will fail to start without one
+- Docker is **not required yet** for the app itself — only once Phase 10's containerised
+  setup lands.
 
 ### 1. Clone the repo
 
@@ -249,6 +253,7 @@ python -m scripts.run_graph "How does the Growth tier's pricing compare to what 
 pytest -v                    # run the automated test suite (pure, no API calls)
 python -m scripts.smoke_test # verify provider failover and tool calling work
 python -m eval.run_ragas     # score the system against RAGAS (real API calls, few min)
+python -m scripts.test_cache # verify semantic cache hit/miss/bypass against real Redis
 ```
 
 ---
@@ -310,6 +315,11 @@ not conceptual gain).
   question answered half its question with a real, valid citation while abstaining on the
   other half; because abstained answers are excluded from scoring, that well-grounded half
   was never evaluated. A real gap in the scoring model, named rather than smoothed over.
+- The semantic cache's similarity threshold (0.93) is deliberately strict: a real
+  paraphrase ("How long does the free trial period last?" vs. "What is the trial length?")
+  measured only 0.68 similarity and correctly missed rather than risk serving a subtly
+  wrong cached answer as if it were freshly reasoned. Kept strict on purpose — a false
+  cache hit is worse than a false miss — rather than tuned to chase one example.
 
 A final, consolidated **Known limitations** section — with the completed RAGAS run above
 already folded in — is assembled in Phase 10, alongside the sample transcript and

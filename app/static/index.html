@@ -7,7 +7,7 @@
 <style>
   :root { --bg: #0f1115; --panel: #161a22; --border: #2a2f3a; --text: #e6e8eb;
           --muted: #8a93a3; --pending: #3a4150; --active: #d9a441; --done: #4caf7d;
-          --failover: #e05a5a; --revise: #e07a3a; }
+          --failover: #e05a5a; --revise: #e07a3a; --cache-hit: #3ab6d9; }
   * { box-sizing: border-box; }
   body { margin: 0; font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); }
   header { padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; gap: 10px; align-items: center; }
@@ -76,6 +76,7 @@ const cy = cytoscape({
     { selector: '.active',  style: { 'background-color': '#3a3220', 'border-color': '#d9a441' } },
     { selector: '.done',    style: { 'background-color': '#1f3329', 'border-color': '#4caf7d' } },
     { selector: '.failover',style: { 'border-color': '#e05a5a' } },
+    { selector: '.cache-hit', style: { 'background-color': '#123a44', 'border-color': '#3ab6d9', 'border-width': 3 } },
     { selector: 'edge', style: {
         'width': 2, 'line-color': '#2a2f3a', 'target-arrow-color': '#2a2f3a', 'target-arrow-shape': 'triangle',
         'curve-style': 'bezier' } },
@@ -91,7 +92,7 @@ const cy = cytoscape({
 // every node gets a fixed column by role and a row number handed out in
 // strict creation order (a simple incrementing counter, never reused) — zero
 // overlap is guaranteed by construction, not hoped for from a layout solver.
-const COL_X = { planner: 90, researcher: 340, synthesizer: 590, revise: 590, critic: 840, human: 1090 };
+const COL_X = { planner: 90, researcher: 340, synthesizer: 590, revise: 590, critic: 840, human: 1090, cache: 90 };
 const ROW_GAP = 80;
 
 function nextPosition(col) {
@@ -267,6 +268,24 @@ function handleNodeEvent(msg) {
   }
 }
 
+function handleCacheHit(payload) {
+  // Deliberately does NOT draw the Planner/Researcher/Synthesizer/Critic
+  // chain — none of that work happened, and drawing it would misrepresent a
+  // cache hit as a fresh agent run (D-09's whole point). One clearly-labelled
+  // node instead, distinct styling, no approval step — a cache hit was
+  // already approved once, the time it was first stored (main.py's /resume).
+  const cid = 'cache-hit';
+  addNode(cid, '⚡ Cache Hit', 'cache-hit', 'cache');
+  log(`<b>⚡ Cache Hit</b> — similarity=${payload.similarity.toFixed(3)}`, 'served instantly, no agent run (D-09)');
+
+  const finalEl = document.getElementById('final');
+  finalEl.style.display = 'block';
+  finalEl.innerHTML =
+    `<b>⚡ Served from cache</b> (similarity ${payload.similarity.toFixed(3)}) — no fresh agent run.<br>` +
+    `${payload.answer}` +
+    `<div class="citations">citations: ${(payload.citations || []).join(', ') || '(none)'}</div>`;
+}
+
 function handleAwaitingApproval(payload) {
   const hid = 'human-approval';
   addNode(hid, 'Human\nApproval', 'active', 'human');
@@ -341,6 +360,11 @@ document.getElementById('askBtn').onclick = () => {
 
   source.addEventListener('awaiting_approval', (e) => {
     handleAwaitingApproval(JSON.parse(e.data));
+    source.close();
+  });
+
+  source.addEventListener('cache_hit', (e) => {
+    handleCacheHit(JSON.parse(e.data));
     source.close();
   });
 

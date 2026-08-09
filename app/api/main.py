@@ -27,6 +27,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.api.schemas import (
     AskRequest,
+    CacheHit,
     CriticVerdictSchema,
     FinalAnswer,
     FindingSchema,
@@ -36,6 +37,7 @@ from app.api.schemas import (
     ResumeRequest,
     SynthesisSchema,
 )
+from app.cache.semantic import get_cache
 from app.core.tracing import current_thread_id, tracer
 from app.graph.builder import RECURSION_LIMIT, build_graph, run_to_interrupt_or_end
 from app.graph.state import initial_state
@@ -43,9 +45,14 @@ from app.graph.state import initial_state
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Cache connection opened eagerly here too, alongside the graph — fail
+    # fast at startup if Redis is unreachable, not on a visitor's first
+    # question. Closed on shutdown, same lifecycle as the graph's checkpointer.
+    cache = get_cache()
     async with build_graph() as graph:
         app.state.graph = graph
         yield
+    await cache.close()
 
 
 app = FastAPI(title="Multi-Agent RAG Research Platform", lifespan=lifespan)
@@ -82,12 +89,17 @@ async def health() -> HealthResponse:
     return HealthResponse()
 
 
-@app.post("/ask", response_model=PendingApproval)
-async def ask(payload: AskRequest, request: Request) -> PendingApproval:
-    """Runs the graph to the human-approval interrupt and returns — never a
-    final answer directly, since every path funnels through that checkpoint
-    (D-14). Blocking: this call takes as long as the full research run does.
+@app.post("/ask", response_model=PendingApproval | CacheHit)
+async def ask(payload: AskRequest, request: Request) -> PendingApproval | CacheHit:
+    """Checks the semantic cache first (Phase 8, D-09); on a miss, runs the
+    graph to the human-approval interrupt and returns — never a final answer
+    directly, since every path funnels through that checkpoint (D-14).
+    Blocking: a cache miss takes as long as the full research run does.
     """
+    cache_hit = await get_cache().lookup(payload.question)
+    if cache_hit is not None:
+        return CacheHit(answer=cache_hit.answer, citations=cache_hit.citations, similarity=cache_hit.similarity)
+
     thread_id = str(uuid.uuid4())
     token = current_thread_id.set(thread_id)
     try:
@@ -137,6 +149,12 @@ async def ask_stream(q: str, request: Request) -> EventSourceResponse:
         printed = 0
         try:
             yield {"event": "started", "data": json.dumps({"thread_id": thread_id})}
+
+            cache_hit = await get_cache().lookup(q)
+            if cache_hit is not None:
+                hit = CacheHit(answer=cache_hit.answer, citations=cache_hit.citations, similarity=cache_hit.similarity)
+                yield {"event": "cache_hit", "data": hit.model_dump_json()}
+                return
 
             async for state in graph.astream(initial_state(q), _config_for(thread_id), stream_mode="values"):
                 # Drain first: guaranteed to hold every LLM-call event this
@@ -194,6 +212,20 @@ async def resume(payload: ResumeRequest, request: Request) -> FinalAnswer:
         raise HTTPException(500, detail)
 
     synthesis = final_state["synthesis"]
+
+    if payload.approved:
+        # Only ever written here, only on approval — preserves the HITL
+        # guarantee that every answer ever served, cached or fresh, was
+        # approved by a human at least once. A rejected answer is never cached.
+        await get_cache().store(
+            final_state["question"],
+            answer=synthesis.answer,
+            citations=synthesis.citations,
+            abstained=synthesis.abstained,
+            revision_count=final_state["revision_count"],
+            escalation_count=final_state["escalation_count"],
+        )
+
     return FinalAnswer(
         thread_id=payload.thread_id,
         answer=synthesis.answer,
