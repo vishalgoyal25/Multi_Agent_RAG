@@ -71,6 +71,12 @@ class ResearchAngle:
 
     angle_id: str
     question: str
+    # Set only on a revision's re-fan-out (edges.py's route_after_clear_for_revision).
+    # Without this, a critic-triggered revision would send researchers back to
+    # repeat the exact same search that already failed to satisfy the Critic —
+    # a loop in name only, since D-06 bounds it to a single attempt and that
+    # attempt needs to actually be corrective.
+    feedback: str | None = None
 
 
 @dataclass(frozen=True)

@@ -9,10 +9,17 @@ langgraph>=0.2.0
 # Pulled in by langgraph; listed explicitly so the dependency is visible rather
 # than implicit.
 langchain-core>=0.3.0
+
 # Durable checkpointing. MemorySaver is in-process and would be wiped by
 # `uvicorn --reload` between an interrupt and a resume, which breaks both the
 # crash-resume claim and the human-in-the-loop demo (D-14).
 langgraph-checkpoint-sqlite>=2.0.0
+
+# AsyncSqliteSaver imports this directly; almost certainly arrives
+# transitively via langgraph-checkpoint-sqlite, but declared explicitly
+# rather than assumed — the graph is fully async, so the async saver (and
+# therefore this) is what actually gets used, not the sync SqliteSaver.
+aiosqlite>=0.20.0
 
 # --- LLM access ---
 # One SDK, both providers: Groq and Cerebras expose OpenAI-compatible endpoints,

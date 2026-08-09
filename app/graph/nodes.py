@@ -14,9 +14,12 @@ context before being trusted — never what a model merely claims it cited
 
 from __future__ import annotations
 
+from langgraph.types import interrupt
+
 from app.core.config import settings
 from app.core.llm import call_llm_with_tools
 from app.graph.state import (
+    CLEAR,
     CriticVerdict,
     Finding,
     Plan,
@@ -77,8 +80,37 @@ _PLANNER_SCHEMA = {
 }
 
 
-async def planner_node(state: ResearchState) -> dict:
-    """Agentic (D-05): decides the shape of the work, not a threshold in code."""
+async def planner_node(state: ResearchState, *, force_multi_angle: bool = False) -> dict:
+    """Agentic (D-05): decides the shape of the work, not a threshold in code.
+
+    `force_multi_angle` is used only by `planner_escalate_node` (D-13): the
+    cheap path already tried and came up empty, so the escalated attempt is
+    constrained via the tool schema's `enum` — not just a prompt suggestion —
+    so it structurally cannot classify the question `simple` a second time.
+    """
+    schema = _PLANNER_SCHEMA
+    escalation_note = ""
+    if force_multi_angle:
+        schema = {
+            **_PLANNER_SCHEMA,
+            "parameters": {
+                **_PLANNER_SCHEMA["parameters"],
+                "properties": {
+                    **_PLANNER_SCHEMA["parameters"]["properties"],
+                    "mode": {
+                        **_PLANNER_SCHEMA["parameters"]["properties"]["mode"],
+                        "enum": ["multi_angle"],
+                    },
+                },
+            },
+        }
+        escalation_note = (
+            "\n\nA first, narrower attempt at this question found insufficient "
+            "evidence. Decompose it into at least 2 distinct research angles this "
+            "time, broadening the investigation rather than repeating the same "
+            "narrow lookup."
+        )
+
     result = await call_llm_with_tools(
         node="planner",
         purpose="decide research mode and angles",
@@ -102,23 +134,38 @@ async def planner_node(state: ResearchState) -> dict:
                     "Example — multi_angle: 'What data residency options are available, "
                     "and how do they interact with the governance audit requirements?' "
                     "(two distinct topics: deployment options, and governance/audit)."
+                    f"{escalation_note}"
                 ),
             }
         ],
         tool_name="plan_research",
-        tool_schema=_PLANNER_SCHEMA,
+        tool_schema=schema,
     )
 
     mode = result["mode"]
     angles = tuple(result["angles"])
     if mode not in ("simple", "multi_angle") or not angles:
         raise ValueError(f"Planner returned an invalid plan: {result!r}")
+    if force_multi_angle and mode != "multi_angle":
+        raise ValueError(f"Escalated planning must return multi_angle, got: {result!r}")
 
     plan = Plan(mode=mode, angles=angles, reason=result["reason"])
     return {
         "plan": plan,
         "trace_events": [f"Planner: {plan.mode} ({len(plan.angles)} angle(s)) — {plan.reason}"],
     }
+
+
+async def planner_escalate_node(state: ResearchState) -> dict:
+    """Escalation entry point (D-13): re-runs the Planner forced to
+    `multi_angle`, and increments `escalation_count` — the counter
+    `route_after_synthesizer`'s belt-and-suspenders check reads (edges.py)."""
+    result = await planner_node(state, force_multi_angle=True)
+    result["escalation_count"] = state["escalation_count"] + 1
+    result["trace_events"] = result["trace_events"] + [
+        "Escalated: re-planned as multi_angle after the cheap path came up empty"
+    ]
+    return result
 
 
 # --- Researcher ----------------------------------------------------------------
@@ -169,6 +216,18 @@ async def researcher_node(angle: ResearchAngle) -> dict:
     candidates = await ahybrid_search(angle.question, top_k=settings.retrieval_top_k)
     candidate_ids = {c.chunk_id for c in candidates}
 
+    # Set only on a revision's re-fan-out (edges.py's
+    # route_after_clear_for_revision). Without this, a critic-triggered
+    # revision would send researchers back to repeat the exact search that
+    # already failed to satisfy the Critic — bounded to one attempt (D-06),
+    # so that attempt has to actually be corrective.
+    feedback_note = (
+        f"\n\nA reviewer flagged the previous attempt at this question — address "
+        f"this specifically:\n{angle.feedback}"
+        if angle.feedback
+        else ""
+    )
+
     result = await call_llm_with_tools(
         node="researcher",
         purpose=f"extract finding for angle {angle.angle_id}",
@@ -180,6 +239,7 @@ async def researcher_node(angle: ResearchAngle) -> dict:
                     f"Retrieved candidate chunks:\n{_format_candidates(candidates)}\n\n"
                     "Select only the chunks that genuinely support an answer to this "
                     "angle, and extract a concise finding grounded in them."
+                    f"{feedback_note}"
                 ),
             }
         ],
@@ -377,3 +437,53 @@ async def critic_node(state: ResearchState) -> dict:
         "critic_verdict": verdict,
         "trace_events": [f"Critic: {'approved' if verdict.approved else 'revise'} — {verdict.feedback}"],
     }
+
+
+# --- Revision support ---------------------------------------------------------
+
+
+async def clear_for_revision_node(state: ResearchState) -> dict:
+    """Runs before the revised research fans out (edges.py's
+    `route_after_clear_for_revision`) — a real node, since only a node can
+    update state; the routing function that follows structurally cannot.
+    Not `async def` for any I/O of its own — it stays a coroutine only so it
+    can sit in the graph alongside the other (genuinely async) nodes without
+    a special case in `builder.py`.
+    """
+    next_revision = state["revision_count"] + 1
+    return {
+        "findings": CLEAR,
+        "revision_count": next_revision,
+        "trace_events": [f"Revision {next_revision}: findings cleared, re-researching with critic feedback"],
+    }
+
+
+# --- Human-in-the-loop ---------------------------------------------------------
+
+
+async def human_approval_node(state: ResearchState) -> dict:
+    """The single HITL checkpoint (D-14): every path that reaches a final
+    answer — the cheap path's direct success, or a critic-approved
+    multi_angle answer — funnels through here before the graph ends. Fixes
+    the resume contract now, before Phase 5 exposes it over HTTP, so Phase 5
+    has nothing left to invent:
+
+    - **Interrupt payload** (what a human sees): the question, the plan,
+      every finding, the draft answer with its citations, and the critic's
+      verdict if there was one — the same evidence the Synthesizer had, not
+      a black box.
+    - **Resume value** (what the caller sends back): `{"approved": bool}`,
+      or a bare bool. What happens on `approved=False` is a caller-level
+      policy, not this graph's — Phase 4 only guarantees the pause and the
+      resume, not a remediation flow for a rejection.
+    """
+    payload = {
+        "question": state["question"],
+        "plan": state["plan"],
+        "findings": state["findings"],
+        "synthesis": state["synthesis"],
+        "critic_verdict": state.get("critic_verdict"),
+    }
+    decision = interrupt(payload)
+    approved = bool(decision.get("approved")) if isinstance(decision, dict) else bool(decision)
+    return {"trace_events": [f"Human approval: {'approved' if approved else 'rejected'}"]}
