@@ -129,6 +129,29 @@ def _build_graph() -> StateGraph:
     return graph
 
 
+async def run_to_interrupt_or_end(graph, stream_input, config: dict) -> tuple[dict | None, dict | None]:
+    """Runs the graph until it either hits the human-approval interrupt or
+    completes. Returns `(interrupt_payload, final_state)` — exactly one is
+    not `None`.
+
+    `stream_mode="values"`, not "updates": confirmed from langgraph's own
+    `pregel/_io.py` that "updates" mode explicitly filters interrupted tasks
+    out of its output (`map_output_updates` drops any write tagged
+    `INTERRUPT`), so it would never surface the pause at all.
+
+    Unlike `scripts/run_graph.py`'s version of this loop, this one does no
+    console printing or state diffing — the API's live progress comes from
+    the tracer's subscriber queue running concurrently (Phase 5's
+    `/ask/stream`), not from inspecting state snapshots here.
+    """
+    last_state: dict | None = None
+    async for state in graph.astream(stream_input, config, stream_mode="values"):
+        if "__interrupt__" in state:
+            return state["__interrupt__"][0].value, None
+        last_state = state
+    return None, last_state
+
+
 @asynccontextmanager
 async def build_graph():
     """Compile the graph with a durable SQLite checkpointer.

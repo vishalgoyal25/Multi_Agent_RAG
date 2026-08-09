@@ -133,3 +133,21 @@ class ResearchState(TypedDict):
     # (never cleared, unlike `findings`): a revision's history is worth
     # keeping even after the revision itself is superseded.
     trace_events: Annotated[list[str], operator.add]
+
+
+def initial_state(question: str) -> ResearchState:
+    """The zero-value state every run starts from. One shared definition —
+    `scripts/run_graph.py` (Phase 4) and `app/api/main.py` (Phase 5) both need
+    the exact same shape; this is that one place, not two copies drifting
+    apart from each other over time.
+    """
+    return {
+        "question": question,
+        "plan": None,
+        "findings": [],
+        "synthesis": None,
+        "critic_verdict": None,
+        "revision_count": 0,
+        "escalation_count": 0,
+        "trace_events": [],
+    }

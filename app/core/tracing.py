@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal
@@ -31,6 +32,15 @@ from typing import Any, Literal
 from app.core.config import settings
 
 EventKind = Literal["llm_call", "llm_failover", "routing", "cache", "node", "error"]
+
+# Set once per HTTP request (app/api/main.py, Phase 5), not passed as a
+# parameter through every node and every call_llm invocation. A ContextVar is
+# the standard pattern for exactly this — "which request does this log line
+# belong to" — and `asyncio.create_task()` copies the current context at
+# creation time, so two concurrent /ask/stream requests each get correctly
+# isolated thread_ids through their entire async call chain without nodes.py
+# or llm.py needing to know this concept exists at all.
+current_thread_id: ContextVar[str | None] = ContextVar("current_thread_id", default=None)
 
 
 @dataclass
@@ -46,6 +56,10 @@ class TraceEvent:
     node: str
     purpose: str
     ts: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    # Auto-populated from `current_thread_id` in `Tracer.emit()` if not given
+    # explicitly — see that ContextVar's docstring above for why this isn't a
+    # parameter threaded through every call site instead.
+    thread_id: str | None = None
 
     # What the event concluded, in one short human-readable line. This is the
     # field you actually read when debugging a run.
@@ -115,6 +129,9 @@ class Tracer:
         syscall runs via ``asyncio.to_thread`` so it never stalls the event loop,
         which matters here because several researchers trace concurrently.
         """
+        if event.thread_id is None:
+            event.thread_id = current_thread_id.get()
+
         line = json.dumps(event.to_dict(), ensure_ascii=False) + "\n"
         async with self._lock:
             await asyncio.to_thread(self._write_line_sync, line)
