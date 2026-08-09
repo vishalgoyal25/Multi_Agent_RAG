@@ -1,12 +1,14 @@
 # Multi-Agent RAG Research Platform
 
-> **Status: Phases 0–8 of 11 complete.** Core system (LLM client, retrieval, all four
+> **Status: Phases 0–9 of 11 complete.** Core system (LLM client, retrieval, all four
 > agents, the graph, the API, the live UI) is built and verified against real runs, it has
-> been formally scored with real RAGAS evaluation numbers, and it now sits behind a
-> semantic cache — a repeated or paraphrased question is served in milliseconds, with a
-> cache hit always shown as a cache hit, never as fresh work. CI and
-> containerisation/final docs are still ahead. See [Progress](#progress) for the exact
-> state of each phase and [Evaluation results](#evaluation-results) for the real numbers.
+> been formally scored with real RAGAS evaluation numbers, it sits behind a semantic cache
+> that always shows a cache hit as a cache hit, never as fresh work, and its deterministic
+> test suite now runs automatically on every push via GitHub Actions. Containerisation and
+> the final sample transcript are still ahead. See [Progress](#progress) for the exact
+> state of each phase, [Evaluation results](#evaluation-results) for the real numbers, and
+> [Two kinds of testing](#two-kinds-of-testing-and-why-ci-only-owns-one-of-them) for why CI
+> doesn't grade the RAGAS scores above.
 
 A multi-agent research system that answers **complex, multi-step questions** over a
 document corpus — and shows its work live while doing it.
@@ -35,7 +37,7 @@ human-approval step, exactly as it looks in a browser.
 | 6 | Live frontend — animated Cytoscape.js graph | ✅ |
 | 7 | Evaluation — real RAGAS scoring against a 6-question set | ✅ |
 | 8 | Semantic cache — Redis | ✅ |
-| 9 | CI — pytest + GitHub Actions | ⬜ |
+| 9 | CI — pytest + GitHub Actions | ✅ |
 | 10 | Sample transcript, containerisation, final README | ⬜ |
 
 Each completed phase was closed only after real terminal/browser output confirmed it
@@ -66,6 +68,36 @@ Scores exclude the 2 questions that correctly abstained (no claims to grade fait
 against) — same evaluation set includes a deliberately uncovered question and the corpus's
 built-in factual conflict, both of which produced genuine abstains rather than confident
 guesses. Full per-question results: [`eval/results.json`](eval/results.json).
+
+---
+
+## Two kinds of testing, and why CI only owns one of them
+
+This project runs two genuinely different kinds of verification, on purpose, with
+different tools for each — not one incomplete kind:
+
+| | Deterministic testing | Non-deterministic evaluation |
+|---|---|---|
+| **Tools** | `pytest` (this repo), `mypy`, linters | RAGAS (this repo), or Langfuse/LangSmith/promptfoo elsewhere |
+| **Checks** | Pure logic with exactly one correct answer, forever — RRF's fusion math, citation-ID validation, the graph's revision/escalation caps | LLM output *quality* — faithfulness, relevancy, grounded citations — where no single "correct string" exists to assert against |
+| **Runs** | Automatically, on every push, via [GitHub Actions](.github/workflows/ci.yml) | Manually, on demand (`python -m eval.run_ragas`) |
+| **Blocks a merge?** | Yes — red means something real broke | No — reported for a human to read as a trend, never gated on a threshold |
+
+**Why the split, not one unified test suite.** An LLM's output can legitimately differ
+between two runs of *unchanged* code (sampling, model updates), and judging its quality —
+was this answer faithful to the retrieved context? — isn't a lookup, it's a judgment call.
+The only way to make that judgment at scale is another LLM acting as judge, which is
+exactly what RAGAS's metrics do — and a judge call is itself non-deterministic. Wiring
+that into a CI gate would make the pipeline flip red/green on judge noise instead of on
+real regressions, training everyone to ignore it. Deterministic code has none of that
+problem, so `pytest` covers it fully and CI enforces it on every commit without
+qualification.
+
+**What this means in practice:** CI's green check proves the system's pure-logic core is
+intact. It does **not** prove the agents, the routing, or the live UI still work — that
+evidence comes from the RAGAS scores above and the real, screenshotted live runs recorded
+throughout this project's build. A green CI badge and a good RAGAS score are answering two
+different questions, not the same one twice.
 
 ---
 
@@ -130,7 +162,7 @@ process restart, not just a hot-reload), and resumed by a separate approval call
 | Live animated frontend | Self-contained Cytoscape.js page, no build step | ✅ |
 | Evaluation | RAGAS — faithfulness, answer relevancy, context precision/recall, real scores above | ✅ |
 | Semantic caching | Redis, similarity-matched, cache hits visibly traced in the UI | ✅ |
-| CI | `pytest` on deterministic units + GitHub Actions | ⬜ Phase 9 (tests exist and pass locally; wiring is what's left) |
+| CI | `pytest` on deterministic units, wired into GitHub Actions on every push/PR | ✅ |
 | Containerisation | Dockerfile + docker-compose | ⬜ Phase 10 |
 
 ---
