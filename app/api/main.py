@@ -15,12 +15,13 @@ calls would otherwise see each other's events interleaved.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse
 from langgraph.types import Command
 from sse_starlette.sse import EventSourceResponse
 
@@ -48,6 +49,16 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Multi-Agent RAG Research Platform", lifespan=lifespan)
+
+_STATIC_DIR = Path(__file__).resolve().parents[1] / "static"
+
+
+@app.get("/")
+async def index() -> FileResponse:
+    """Serves the single self-contained live-graph page (D-08 — plain
+    HTML/JS/Cytoscape.js, no build toolchain). One route, not a
+    `StaticFiles` mount, since there's exactly one file to serve."""
+    return FileResponse(_STATIC_DIR / "index.html")
 
 
 def _config_for(thread_id: str) -> dict:
@@ -96,8 +107,26 @@ async def ask(payload: AskRequest, request: Request) -> PendingApproval:
 async def ask_stream(q: str, request: Request) -> EventSourceResponse:
     """Same underlying run as `POST /ask`, exposed as Server-Sent Events
     instead of one blocking response — this is what Phase 6's live graph
-    will consume. Ends with an `awaiting_approval` event carrying the same
+    consumes. Ends with an `awaiting_approval` event carrying the same
     payload `/ask` returns directly.
+
+    Streams two kinds of events, merged:
+    - `llm_call`/`llm_failover` (rich: provider, tokens, latency) — from
+      `tracer`'s subscriber queue, same mechanism as before.
+    - `node` (a plain human-readable line) — from the graph's own
+      `trace_events`, which every node writes to regardless of whether it
+      made an LLM call. This closes a real gap: `critic_node`'s auto-approve
+      path (an abstained answer) short-circuits without calling an LLM at
+      all, so it never emits a tracer event — without this second source,
+      the frontend would never show the Critic running in that case, even
+      though it genuinely did.
+
+    A single loop over `astream(..., stream_mode="values")` correctly
+    interleaves both without task/queue juggling: `tracer.emit()` completes
+    *inside* a node before that node's state update ever surfaces to
+    `astream`, so every LLM-call event for a step is already queued by the
+    time that step's state snapshot arrives — draining the queue right
+    before checking the new state is always in the right order.
     """
     graph = request.app.state.graph
     thread_id = str(uuid.uuid4())
@@ -105,39 +134,32 @@ async def ask_stream(q: str, request: Request) -> EventSourceResponse:
     async def event_generator():
         token = current_thread_id.set(thread_id)
         queue = tracer.subscribe()
+        printed = 0
         try:
             yield {"event": "started", "data": json.dumps({"thread_id": thread_id})}
 
-            run_task = asyncio.create_task(
-                run_to_interrupt_or_end(graph, initial_state(q), _config_for(thread_id))
-            )
+            async for state in graph.astream(initial_state(q), _config_for(thread_id), stream_mode="values"):
+                # Drain first: guaranteed to hold every LLM-call event this
+                # step produced, per the ordering argument above. Filtered by
+                # thread_id — necessary, not defensive, since this queue also
+                # receives OTHER concurrent requests' events (`tracer.emit()`
+                # broadcasts to every subscriber, not just this one).
+                while not queue.empty():
+                    event = queue.get_nowait()
+                    if event.thread_id == thread_id:
+                        yield {"event": event.kind, "data": json.dumps(event.to_dict())}
 
-            # Polling with a short timeout, not `asyncio.wait` on the queue
-            # and the task together — simpler to get right, and a 0.25s
-            # worst-case delay is imperceptible for a chat-style UI. Every
-            # event is still filtered by thread_id: this queue also receives
-            # OTHER concurrent requests' events, since `tracer.emit()`
-            # broadcasts to every subscriber, not just this one.
-            while not run_task.done():
-                try:
-                    event = await asyncio.wait_for(queue.get(), timeout=0.25)
-                except asyncio.TimeoutError:
-                    continue
-                if event.thread_id == thread_id:
-                    yield {"event": event.kind, "data": json.dumps(event.to_dict())}
+                if "__interrupt__" in state:
+                    pending = _build_pending_approval(thread_id, state["__interrupt__"][0].value)
+                    yield {"event": "awaiting_approval", "data": pending.model_dump_json()}
+                    return
 
-            while not queue.empty():
-                event = queue.get_nowait()
-                if event.thread_id == thread_id:
-                    yield {"event": event.kind, "data": json.dumps(event.to_dict())}
+                events = state.get("trace_events", [])
+                for line in events[printed:]:
+                    yield {"event": "node", "data": json.dumps({"message": line})}
+                printed = len(events)
 
-            interrupt_payload, _ = run_task.result()
-            if interrupt_payload is None:
-                yield {"event": "error", "data": "Graph finished without reaching the human-approval interrupt."}
-                return
-
-            pending = _build_pending_approval(thread_id, interrupt_payload)
-            yield {"event": "awaiting_approval", "data": pending.model_dump_json()}
+            yield {"event": "error", "data": "Graph finished without reaching the human-approval interrupt."}
         finally:
             tracer.unsubscribe(queue)
             current_thread_id.reset(token)

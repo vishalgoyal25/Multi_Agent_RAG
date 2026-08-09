@@ -1,10 +1,10 @@
 # Multi-Agent RAG Research Platform
 
-> **Status: in development (Phase 1 of 11).** Architecture and design decisions are
-> settled; implementation is underway. Setup steps below are the intended commands —
-> they are verified phase by phase as each is built, and this README is finalised in
-> Phase 10 with real evaluation numbers and an honest limitations section. Progress is
-> tracked in [`PHASES.md`](PHASES.md).
+> **Status: Phases 0–6 of 11 complete.** Core system (LLM client, retrieval, all four
+> agents, the graph, the API, and the live UI) is built and verified against real runs —
+> not just written, actually run and re-run until the evidence held up. Evaluation,
+> semantic caching, CI, and containerisation/final docs are still ahead. See
+> [Progress](#progress) below for the exact state of each phase.
 
 A multi-agent research system that answers **complex, multi-step questions** over a
 document corpus — and shows its work live while doing it.
@@ -13,6 +13,36 @@ A single-pass RAG pipeline runs one fixed retrieval and answers. This system has
 that decide for themselves how to break a question apart, research several angles **in
 parallel**, merge the findings, and **check their own answer** before releasing it. Every
 step streams to the browser as it happens, rendered as an animated node graph.
+
+**[See it running →](Multi-Agent%20RAG-Live%20Research%20Graph.pdf)** — a saved page
+capture of a real run: the animated graph mid-escalation, the live trace panel, and the
+human-approval step, exactly as it looks in a browser.
+
+---
+
+## Progress
+
+| # | Phase | Status |
+|---|---|---|
+| 0 | Plan, rules & repo skeleton | ✅ |
+| 1 | Core foundation — sticky key-pool LLM client, async tracing | ✅ |
+| 2 | Retrieval — hybrid search (BM25 + vector + RRF) | ✅ |
+| 3 | Agent nodes — Planner, Researcher, Synthesizer, Critic | ✅ |
+| 4 | Graph wiring — `Send` fan-out, bounded cycles, checkpointed HITL | ✅ |
+| 5 | API layer — FastAPI, SSE streaming, `/resume` | ✅ |
+| 6 | Live frontend — animated Cytoscape.js graph | ✅ |
+| 7 | Evaluation — RAGAS | ⬜ next |
+| 8 | Semantic cache — Redis | ⬜ |
+| 9 | CI — pytest + GitHub Actions | ⬜ |
+| 10 | Sample transcript, containerisation, final README | ⬜ |
+
+Each completed phase was closed only after real terminal/browser output confirmed it
+worked — not on assumption. Several real bugs were found and fixed along the way (a
+citation/angle-ID collision, a checkpoint-serialization warning, three separate live-UI
+bugs caught from actual screenshots), each root-caused from the actual installed source
+rather than guessed. That process — and the full decision log — lives in this project's
+internal working notes, not published here; what's below is the durable, user-facing
+result.
 
 ---
 
@@ -39,60 +69,63 @@ step streams to the browser as it happens, rendered as an animated node graph.
                    │   Critic    │  unsupported claims? (agentic decision)
                    └──┬───────┬──┘
               revise  │       │  approve
-         ┌────────────┘       └──────────> Final answer
+         ┌────────────┘       └──────────> Human approval (HITL) ───> Final answer
          │
          └──> back to Researcher  (bounded: max 1 revision cycle)
 ```
 
 **Two genuine agentic decision points** — the Planner decides the *shape* of the work
 (how many angles, and what each investigates), and the Critic decides whether to send
-work back. Both are LLM judgement calls, not threshold checks in code. That distinction
-is what makes this agentic rather than a deterministic pipeline expressed in agentic
-tooling.
+work back. Both are LLM judgement calls, not threshold checks in code.
 
 The Researcher and Synthesizer are deliberately **not** agentic — a researcher handed a
 specific angle has nothing meaningful to decide, and making it autonomous would add cost
 and variance for no benefit. Restraint here is the design, not a shortcut.
 
+Every path — whether the cheap single-angle route or the full multi-angle one — pauses at
+a **human-in-the-loop checkpoint** before the answer is finalized. The run is paused with
+LangGraph's `interrupt()`, persisted to a durable SQLite checkpoint (survives a full
+process restart, not just a hot-reload), and resumed by a separate approval call.
+
 ---
 
-## What's demonstrated
+## What's demonstrated (built, not just planned)
 
-| Capability | Where |
-|---|---|
-| Multi-agent orchestration, typed shared state | LangGraph `StateGraph` |
-| Cyclic feedback loops, bounded | Critic → Researcher, max 1 revision |
-| LLM-driven routing (real agency) | Planner and Critic, via native tool calling |
-| Parallel agent execution | LangGraph `Send` API (dynamic fan-out) |
-| Self-critique / reflection | Critic node |
-| Reliability | Checkpointing (resume, not restart), recursion caps, provider failover, human-in-the-loop gate |
-| Observability | Per-node tracing → SSE stream → live graph UI |
-| Hybrid retrieval | BM25 + vector, fused with Reciprocal Rank Fusion |
-| Grounded answers | Citations validated in code; genuine model-generated abstain |
-| Async Python throughout | `AsyncOpenAI`, async retrieval |
-| API service | FastAPI + Server-Sent Events |
-| Semantic caching | Redis, similarity-matched, cache hits visibly traced |
-| Evaluation | RAGAS — faithfulness, answer relevancy, context precision/recall |
-| CI | `pytest` on deterministic units + GitHub Actions |
-| Containerisation | Dockerfile + docker-compose (app + Redis) |
+| Capability | Where | Status |
+|---|---|---|
+| Multi-agent orchestration, typed shared state | LangGraph `StateGraph` | ✅ |
+| Dynamic parallel fan-out | LangGraph `Send` API — researcher count decided at runtime | ✅ |
+| Cyclic feedback loops, bounded | Critic → Researcher, max 1 revision; cheap-path escalation, max 1 | ✅ |
+| LLM-driven routing (real agency) | Planner and Critic, via native tool calling | ✅ |
+| Reliability | Sticky multi-key provider failover, checkpointed resume (survives a restart), recursion caps | ✅ |
+| Human-in-the-loop | `interrupt()`/resume before every final answer | ✅ |
+| Observability | Per-call tracing (provider, tokens, latency) → SSE stream → live graph UI | ✅ |
+| Hybrid retrieval | BM25 + vector, fused with Reciprocal Rank Fusion | ✅ |
+| Grounded answers | Citations validated in code; genuine model-generated abstain | ✅ |
+| Async Python throughout | `AsyncOpenAI`, async retrieval, async tracing | ✅ |
+| API service | FastAPI + Server-Sent Events + REST `/resume` | ✅ |
+| Live animated frontend | Self-contained Cytoscape.js page, no build step | ✅ |
+| Evaluation | RAGAS — faithfulness, answer relevancy, context precision/recall | ⬜ Phase 7 |
+| Semantic caching | Redis, similarity-matched, cache hits visibly traced | ⬜ Phase 8 |
+| CI | `pytest` on deterministic units + GitHub Actions | ⬜ Phase 9 (tests exist and pass locally; wiring is what's left) |
+| Containerisation | Dockerfile + docker-compose | ⬜ Phase 10 |
 
 ---
 
 ## Stack
 
-- **Orchestration:** LangGraph
-- **LLM:** `gpt-oss-120b` — Groq primary, Cerebras automatic failover on 429/5xx, both
-  through the `openai` SDK's `AsyncOpenAI` client
+- **Orchestration:** LangGraph (`Send` fan-out, conditional edges, `AsyncSqliteSaver`
+  checkpointing, `interrupt()`)
+- **LLM:** `gpt-oss-120b` — Groq primary, Cerebras automatic failover, both through the
+  `openai` SDK's `AsyncOpenAI` client. Each provider supports a **pool of keys** (sticky
+  failover: one key used until it fails, then the next, then the next provider)
 - **Vector store:** ChromaDB (local persistent, HNSW indexing internally)
-- **Keyword search:** `rank_bm25` (BM25Okapi)
+- **Keyword search:** `rank_bm25` (BM25Okapi), rebuilt from a JSON sidecar at startup
 - **Embeddings:** `sentence-transformers` / `all-MiniLM-L6-v2` (local, CPU, free)
 - **API:** FastAPI + `sse-starlette`
-- **Frontend:** Cytoscape.js, single self-contained HTML page
-- **Cache:** Redis
-- **Eval:** RAGAS
-
-Reasoning for each of these — including what was rejected and why — is recorded as
-numbered decisions (D-01 onward) in [`PHASES.md`](PHASES.md).
+- **Frontend:** Cytoscape.js, single self-contained HTML page, no build toolchain
+- **Cache (Phase 8):** Redis
+- **Eval (Phase 7):** RAGAS
 
 ---
 
@@ -100,19 +133,25 @@ numbered decisions (D-01 onward) in [`PHASES.md`](PHASES.md).
 
 ### Prerequisites
 
-- Python 3.10 or newer
+- Python 3.11 or newer
 - A free [Groq](https://console.groq.com/keys) API key (primary)
 - A free [Cerebras](https://cloud.cerebras.ai) API key (failover)
-- Docker (for Redis, and for the containerised run)
+- Redis and Docker are **not required yet** — they're only needed once Phases 8 and 10
+  land.
 
-### 1. Install
+### 1. Clone the repo
 
-Use `python` or `python3`, whichever your system recognises.
-
-**Windows:**
 ```bash
+git clone https://github.com/vishalgoyal25/Multi_Agent_RAG.git
+cd Multi_Agent_RAG
+```
+
+### 2. Create a virtual environment and install dependencies
+
+**Windows (PowerShell):**
+```powershell
 python -m venv .venv
-.venv\Scripts\activate
+.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
@@ -123,43 +162,63 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-`sentence-transformers` pulls in PyTorch — expect a few minutes on first install.
+`sentence-transformers` pulls in PyTorch — expect a few minutes on first install. If you
+want the exact dependency versions this project was built and tested against (rather than
+whatever the `>=` floors in `requirements.txt` resolve to today), install from the lock
+file instead: `pip install -r requirements.lock.txt`.
 
-### 2. Configure keys
+### 3. Configure your API keys
 
-```bash
-copy .env.example .env     # Windows
-# cp .env.example .env     # macOS/Linux
+**Windows:**
+```powershell
+copy .env.example .env
 ```
 
-Paste your Groq and Cerebras keys into `.env`. It is git-ignored.
+**macOS / Linux:**
+```bash
+cp .env.example .env
+```
 
-### 3. Build the index
+Open `.env` and paste in your keys. Each provider supports **multiple keys**, comma-separated,
+with no spaces — this stretches free-tier rate limits before ever needing the failover
+provider:
 
+```
+GROQ_API_KEY=key1,key2,key3
+CEREBRAS_API_KEY=key1,key2
+```
+
+A single key per provider works too — just don't add a trailing comma. `.env` is
+git-ignored; it never leaves your machine.
+
+### 4. Build the retrieval index
+
+**Windows / macOS / Linux (same command once the venv is active):**
 ```bash
 python -m app.retrieval.index
 ```
 
-Chunks and embeds `docs/`, stores vectors in ChromaDB and a plain-text copy for BM25.
-Re-run whenever `docs/` changes — it rebuilds from scratch, no stale leftovers.
+Chunks and embeds the 15 documents in `docs/`, stores vectors in ChromaDB, and writes a
+JSON sidecar the keyword index rebuilds from at startup. Re-run this any time `docs/`
+changes — it always rebuilds from scratch, so there's never a stale leftover chunk.
 
-### 4. Start Redis
-
-```bash
-docker run -d -p 6379:6379 redis
-```
-
-### 5. Run
+### 5. Run the server
 
 ```bash
 uvicorn app.api.main:app --reload
 ```
 
-Open `http://127.0.0.1:8000` — ask a question and watch the graph execute live.
+Then open **http://127.0.0.1:8000** in a browser, type a question, and watch the graph
+build itself live as the agents work. Try both a simple factual question and a compound
+one — they take visibly different paths through the graph.
 
-**Or run everything containerised:**
+### 6. (Optional) Run the standalone CLI demo instead
+
+If you'd rather see a full run — including the human-in-the-loop pause and resume — as
+plain terminal output instead of the browser UI:
+
 ```bash
-docker compose up --build
+python -m scripts.run_graph "How does the Growth tier's pricing compare to what the contract guarantees, and what happens if we exceed the data source limit?"
 ```
 
 ---
@@ -172,9 +231,9 @@ retail/consumer AI vendor. Everything in them is invented for this project.
 Fictional on purpose: the model has no pretrained knowledge of Northbay, so a correct,
 cited answer is only possible if retrieval genuinely worked. The corpus also contains a
 deliberate contradiction (one document says a 14-day trial, another says a 30-day
-evaluation period) — which gives the Critic a real conflict to catch between two
-researchers — and several topics that are never covered at all, so the abstain path has
-genuine gaps to fail correctly on.
+evaluation period) — which reliably exercises the abstain path and the escalation cycle in
+real runs, not just in a constructed test case — and several topics that are never covered
+at all, so the abstain path has genuine gaps to fail correctly on.
 
 ---
 
@@ -186,8 +245,9 @@ question in 4–6 LLM calls. This one costs 8–15.
 
 **It is not a replacement.** For a simple factual lookup, the single-pass pipeline is
 faster, cheaper, and equally correct. This system earns its extra cost only on genuinely
-multi-step questions — which is why the Planner is allowed to route simple questions
-down a single-researcher path rather than always fanning out.
+multi-step questions — which is why the Planner routes simple questions down a cheap,
+single-researcher path rather than always fanning out, with an escape hatch back to the
+full path if that cheap attempt comes up empty.
 
 Knowing when *not* to reach for agents is part of the design.
 
@@ -196,14 +256,26 @@ Knowing when *not* to reach for agents is part of the design.
 ## Honest scope
 
 This is a **prototype built to production shape, not a production system.** It
-demonstrates the architecture a scalable system uses — async, service-exposed,
-containerised, observable, evaluated, CI-checked — but it is not load-tested or
-horizontally scaled, and it is not deployed to a cloud provider.
+demonstrates the architecture a scalable system uses — async throughout, service-exposed,
+observable, checkpointed — but it is not load-tested, not horizontally scaled, and not
+deployed to a cloud provider.
 
-Deliberately excluded, each with a stated reason in [`PHASES.md`](PHASES.md): cloud
-deployment, Celery workers (SSE streaming already solves the blocking problem here), and
-a pgvector migration (Chroma already uses HNSW indexing, so the migration would be
-operations work rather than conceptual gain).
+Deliberately excluded, each for a stated reason: cloud deployment, Celery workers (SSE
+streaming already solves the blocking-request problem here), and a pgvector migration
+(Chroma already uses HNSW indexing internally, so the migration would be operations work,
+not conceptual gain).
 
-A full **Known limitations** section — real failure modes found during the build, with
-real numbers — is added in Phase 10.
+**Known limitations found so far, real and not hidden:**
+- Reciprocal Rank Fusion can, by design, let a chunk that both retrieval methods
+  moderately agree on outrank a chunk one method strongly prefers — a real, observed
+  property of RRF, not a bug, and not retuned away.
+- `gpt-oss-120b`'s reported reasoning-token counts differ meaningfully between Groq and
+  Cerebras for near-identical output — "reasoning tokens" isn't a perfectly comparable
+  number across providers even when total cost is.
+- The Critic's revision cycle (send work back once) is fully implemented and unit-tested,
+  but has not yet been observed firing on a live run — in every real attempt so far, the
+  Synthesizer's own honesty checks caught the evidence gap first. Recorded as a real
+  observation, not claimed as demonstrated.
+
+A full **Known limitations** section — with real evaluation numbers — is added in Phase
+10, once the RAGAS harness (Phase 7) has run.

@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Multi-Agent RAG — Live Research Graph</title>
+<script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+<style>
+  :root { --bg: #0f1115; --panel: #161a22; --border: #2a2f3a; --text: #e6e8eb;
+          --muted: #8a93a3; --pending: #3a4150; --active: #d9a441; --done: #4caf7d;
+          --failover: #e05a5a; --revise: #e07a3a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); }
+  header { padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; gap: 10px; align-items: center; }
+  header h1 { font-size: 16px; margin: 0 16px 0 0; font-weight: 600; color: var(--muted); }
+  #question { flex: 1; padding: 8px 12px; background: var(--panel); border: 1px solid var(--border);
+              border-radius: 6px; color: var(--text); font-size: 14px; }
+  button { padding: 8px 16px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel);
+           color: var(--text); cursor: pointer; font-size: 14px; }
+  button:hover:not(:disabled) { border-color: var(--active); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  main { display: flex; height: calc(100vh - 57px); }
+  #cy { flex: 1; }
+  #panel { width: 420px; border-left: 1px solid var(--border); display: flex; flex-direction: column; }
+  #log { flex: 1; overflow-y: auto; padding: 12px; font-size: 12px; }
+  .entry { padding: 6px 8px; border-radius: 4px; margin-bottom: 4px; background: var(--panel); }
+  .entry .meta { color: var(--muted); font-size: 11px; }
+  #approval { border-top: 1px solid var(--border); padding: 14px; display: none; }
+  #approval h3 { margin: 0 0 8px; font-size: 13px; color: var(--muted); }
+  #approval .actions { display: flex; gap: 8px; margin-top: 10px; }
+  #final { padding: 14px; border-top: 1px solid var(--border); font-size: 13px; display: none; }
+  #final .citations { color: var(--muted); font-size: 11px; margin-top: 6px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Multi-Agent RAG</h1>
+  <input id="question" type="text" placeholder="Ask a question about Northbay Commerce AI..."
+         value="How does the Growth tier's pricing compare to what the contract guarantees, and what happens if we exceed the data source limit?" />
+  <button id="askBtn">Ask</button>
+</header>
+
+<main>
+  <div id="cy"></div>
+  <div id="panel">
+    <div id="log"></div>
+    <div id="approval">
+      <h3>Awaiting human approval</h3>
+      <div id="approvalSummary"></div>
+      <div class="actions">
+        <button id="approveBtn">Approve</button>
+        <button id="rejectBtn">Reject</button>
+      </div>
+    </div>
+    <div id="final"></div>
+  </div>
+</main>
+
+<script>
+// --- Cytoscape setup ---------------------------------------------------
+// minZoom/maxZoom exist specifically to stop the "one giant node" bug: with
+// only 1-2 elements on screen, Cytoscape's default fit-to-viewport zooms IN
+// aggressively, so a normal 90x40 box fills the entire canvas. Capping zoom
+// makes that structurally impossible regardless of how sparse the graph is.
+const cy = cytoscape({
+  container: document.getElementById('cy'),
+  minZoom: 0.4,
+  maxZoom: 1.3,
+  style: [
+    { selector: 'node', style: {
+        'label': 'data(label)', 'color': '#e6e8eb', 'text-valign': 'center', 'text-halign': 'center',
+        'font-size': 11, 'width': 100, 'height': 44, 'shape': 'round-rectangle',
+        'background-color': '#3a4150', 'border-width': 2, 'border-color': '#2a2f3a', 'text-wrap': 'wrap',
+        'text-max-width': 90 } },
+    { selector: '.pending', style: { 'background-color': '#3a4150', 'border-color': '#2a2f3a' } },
+    { selector: '.active',  style: { 'background-color': '#3a3220', 'border-color': '#d9a441' } },
+    { selector: '.done',    style: { 'background-color': '#1f3329', 'border-color': '#4caf7d' } },
+    { selector: '.failover',style: { 'border-color': '#e05a5a' } },
+    { selector: 'edge', style: {
+        'width': 2, 'line-color': '#2a2f3a', 'target-arrow-color': '#2a2f3a', 'target-arrow-shape': 'triangle',
+        'curve-style': 'bezier' } },
+    { selector: '.escalate-edge', style: { 'line-color': '#d9a441', 'target-arrow-color': '#d9a441', 'line-style': 'dashed' } },
+    { selector: '.revise-edge',   style: { 'line-color': '#e07a3a', 'target-arrow-color': '#e07a3a', 'line-style': 'dashed' } },
+  ],
+});
+
+// Deterministic manual layout, not an automatic layout algorithm re-run on
+// every mutation. Re-running `breadthfirst` repeatedly on a live-growing
+// graph proved unreliable in practice — nodes from separate branches could
+// overlap or be assigned confusing positions relative to each other. Instead:
+// every node gets a fixed column by role and a row number handed out in
+// strict creation order (a simple incrementing counter, never reused) — zero
+// overlap is guaranteed by construction, not hoped for from a layout solver.
+const COL_X = { planner: 90, researcher: 340, synthesizer: 590, revise: 590, critic: 840, human: 1090 };
+const ROW_GAP = 80;
+
+function nextPosition(col) {
+  const y = 60 + state.nextRow * ROW_GAP;
+  state.nextRow += 1;
+  return { x: COL_X[col], y };
+}
+
+function refit() {
+  // Animated, not a hard cy.fit() snap — smooth pan/zoom as the graph grows.
+  cy.animate({ fit: { eles: cy.elements(), padding: 60 } }, { duration: 300 });
+}
+
+function addNode(id, label, cls, col) {
+  const existing = cy.getElementById(id);
+  if (existing.length) return existing;
+  const n = cy.add({ data: { id, label }, classes: cls || 'pending', position: nextPosition(col) });
+  refit();
+  return n;
+}
+
+function addEdge(source, target, cls) {
+  const id = `${source}->${target}`;
+  if (cy.getElementById(id).length) return;
+  cy.add({ data: { id, source, target }, classes: cls || '' });
+  refit();
+}
+
+function setClass(id, cls) {
+  const n = cy.getElementById(id);
+  if (n.length) n.removeClass('pending active done').addClass(cls);
+}
+
+function flashFailover(id) {
+  const n = cy.getElementById(id);
+  if (!n.length) return;
+  n.addClass('failover');
+  setTimeout(() => n.removeClass('failover'), 900);
+}
+
+// --- Log panel -----------------------------------------------------------
+function log(message, meta) {
+  const el = document.getElementById('log');
+  const div = document.createElement('div');
+  div.className = 'entry';
+  div.innerHTML = `${message}${meta ? `<div class="meta">${meta}</div>` : ''}`;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}
+
+// --- Run state (per question) --------------------------------------------
+// Rounds distinguish escalation (a fresh Planner call) from a revision (the
+// Critic sending the SAME angles back) — both reuse angle_ids like "a0", so
+// node IDs must be namespaced by round/revision or a second cycle would
+// silently collide with nodes from the first.
+let state = null;
+function resetState() {
+  state = { plannerCount: 0, revisionCount: 0, lastTerminalNode: null, fanOutSource: null, nextRow: 0 };
+}
+
+function angleIdFromPurpose(purpose) {
+  const m = /angle (\S+)/.exec(purpose || '');
+  return m ? m[1] : 'a0';
+}
+
+function researcherNodeId(angleId) {
+  return `researcher-${state.plannerCount}-${state.revisionCount}-${angleId}`;
+}
+function synthesizerNodeId() { return `synthesizer-${state.plannerCount}-${state.revisionCount}`; }
+function criticNodeId() { return `critic-${state.plannerCount}-${state.revisionCount}`; }
+function plannerNodeId() { return `planner-${state.plannerCount}`; }
+
+// `evt.decision` is truncated to 200 chars server-side, deliberately, to
+// keep the disk trace log scannable (app/core/llm.py). A short plan fits;
+// a multi-angle plan with verbose angle text can truncate mid-JSON. Never
+// let that break graph topology — parse defensively, and fall back to a
+// plain label on failure. `null` signals "couldn't parse" to the caller.
+function tryParseDecision(evt) {
+  try {
+    return JSON.parse(evt.decision);
+  } catch (err) {
+    return null;
+  }
+}
+
+function handlePlannerEvent(evt) {
+  state.plannerCount += 1;
+  state.revisionCount = 0;
+
+  const pid = plannerNodeId();
+  addNode(pid, state.plannerCount === 1 ? 'Planner' : 'Planner\n(escalated)', 'done', 'planner');
+  if (state.plannerCount > 1 && state.lastTerminalNode) {
+    addEdge(state.lastTerminalNode, pid, 'escalate-edge');
+  }
+
+  const decision = tryParseDecision(evt);
+  const summary = decision
+    ? `${decision.mode} (${decision.angles.length} angle${decision.angles.length > 1 ? 's' : ''})`
+    : '(decision text truncated)';
+  log(`<b>Planner</b>: ${summary}`, `${evt.provider}/${evt.key_index} · ${evt.total_tokens} tok · ${evt.latency_ms || ''}`);
+
+  // Researcher nodes are NOT created here from `decision.angles` — that
+  // depends on the same truncatable JSON. Each is created lazily in
+  // `handleResearcherEvent`, from its own short, never-truncated `purpose`
+  // field, the first time that researcher's own event arrives.
+  state.fanOutSource = pid;
+  state.lastTerminalNode = pid;
+}
+
+function handleResearcherEvent(evt) {
+  const angleId = angleIdFromPurpose(evt.purpose);
+  const rid = researcherNodeId(angleId);
+
+  // Created here, not in handlePlannerEvent — see that function's comment.
+  // Also covers the failover case: a researcher's FIRST event can be a
+  // failure (a real one, observed live: Groq rate-limited, retried on the
+  // next key), so creation can't wait for a successful llm_call specifically.
+  addNode(rid, `Researcher\n${angleId}`, 'active', 'researcher');
+  addEdge(state.fanOutSource, rid);
+
+  if (evt.kind === 'llm_failover') {
+    flashFailover(rid);
+    log(`<b>Researcher[${angleId}]</b>: failover — ${evt.decision}`, `${evt.key_index}`);
+    return;
+  }
+  setClass(rid, 'done');
+  log(`<b>Researcher[${angleId}]</b>: done`, `${evt.provider}/${evt.key_index} · ${evt.total_tokens} tok`);
+
+  const sid = synthesizerNodeId();
+  addNode(sid, 'Synthesizer', 'active', 'synthesizer');
+  addEdge(rid, sid);
+  state.lastTerminalNode = sid;
+}
+
+function handleSynthesizerEvent(evt) {
+  const sid = synthesizerNodeId();
+  setClass(sid, 'done');
+  const decision = tryParseDecision(evt);
+  log(`<b>Synthesizer</b>: ${decision ? `abstained=${decision.abstained}` : '(decision text truncated)'}`,
+      `${evt.total_tokens} tok`);
+  state.lastTerminalNode = sid;
+}
+
+function handleCriticEvent(evt) {
+  const cid = criticNodeId();
+  addNode(cid, 'Critic', 'done', 'critic');
+  addEdge(synthesizerNodeId(), cid);
+  if (evt) {
+    const decision = tryParseDecision(evt);
+    log(`<b>Critic</b>: ${decision ? (decision.approved ? 'approved' : 'revise') : '(decision text truncated)'}`,
+        `${evt.total_tokens} tok`);
+  }
+  state.lastTerminalNode = cid;
+}
+
+function handleNodeEvent(msg) {
+  log(msg);
+  if (msg.startsWith('Critic:') && !cy.getElementById(criticNodeId()).length) {
+    // The auto-approve shortcut never calls an LLM, so no llm_call event
+    // arrives for it — this is the only signal the Critic ran at all.
+    handleCriticEvent(null);
+  }
+  if (msg.startsWith('Revision')) {
+    state.revisionCount += 1;
+    const reviseId = `revise-${state.plannerCount}-${state.revisionCount}`;
+    addNode(reviseId, 'Revise', 'active', 'revise');
+    addEdge(state.lastTerminalNode, reviseId, 'revise-edge');
+    // Re-fanned researchers reuse this round's angle_ids, so their node ids
+    // differ only by the now-incremented revisionCount — lazy creation in
+    // handleResearcherEvent handles them the same way as any other round.
+    state.fanOutSource = reviseId;
+    state.lastTerminalNode = reviseId;
+  }
+}
+
+function handleAwaitingApproval(payload) {
+  const hid = 'human-approval';
+  addNode(hid, 'Human\nApproval', 'active', 'human');
+  if (state.lastTerminalNode) addEdge(state.lastTerminalNode, hid);
+
+  document.getElementById('approval').style.display = 'block';
+  document.getElementById('approvalSummary').innerHTML =
+    `<b>${payload.synthesis.abstained ? 'Abstained' : 'Draft answer'}:</b> ${payload.synthesis.answer}` +
+    `<div class="citations">citations: ${payload.synthesis.citations.join(', ') || '(none)'}</div>`;
+
+  // Re-enable explicitly: resolveApproval() disables both buttons once
+  // clicked, and this is the same page across multiple questions (no
+  // reload) — without this, the second question's buttons stay stuck
+  // disabled from the first question's approval.
+  const approveBtn = document.getElementById('approveBtn');
+  const rejectBtn = document.getElementById('rejectBtn');
+  approveBtn.disabled = false;
+  rejectBtn.disabled = false;
+  approveBtn.onclick = () => resolveApproval(payload.thread_id, true, hid);
+  rejectBtn.onclick = () => resolveApproval(payload.thread_id, false, hid);
+}
+
+async function resolveApproval(threadId, approved, hid) {
+  document.getElementById('approveBtn').disabled = true;
+  document.getElementById('rejectBtn').disabled = true;
+  const res = await fetch('/resume', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ thread_id: threadId, approved }),
+  });
+  const final = await res.json();
+  setClass(hid, 'done');
+  document.getElementById('approval').style.display = 'none';
+  const finalEl = document.getElementById('final');
+  finalEl.style.display = 'block';
+  finalEl.innerHTML = `<b>Final answer:</b> ${final.answer}` +
+    `<div class="citations">citations: ${(final.citations || []).join(', ') || '(none)'} ·
+     revisions: ${final.revision_count} · escalations: ${final.escalation_count}</div>`;
+}
+
+// --- SSE wiring ------------------------------------------------------------
+document.getElementById('askBtn').onclick = () => {
+  const question = document.getElementById('question').value.trim();
+  if (!question) return;
+
+  cy.elements().remove();
+  document.getElementById('log').innerHTML = '';
+  document.getElementById('approval').style.display = 'none';
+  document.getElementById('final').style.display = 'none';
+  resetState();
+
+  const source = new EventSource(`/ask/stream?q=${encodeURIComponent(question)}`);
+
+  source.addEventListener('started', (e) => {
+    log(`<b>Started</b>`, JSON.parse(e.data).thread_id);
+  });
+
+  source.addEventListener('llm_call', (e) => {
+    const evt = JSON.parse(e.data);
+    if (evt.node === 'planner') handlePlannerEvent(evt);
+    else if (evt.node === 'researcher') handleResearcherEvent(evt);
+    else if (evt.node === 'synthesizer') handleSynthesizerEvent(evt);
+    else if (evt.node === 'critic') handleCriticEvent(evt);
+  });
+
+  source.addEventListener('llm_failover', (e) => {
+    const evt = JSON.parse(e.data);
+    if (evt.node === 'researcher') handleResearcherEvent(evt);
+    else flashFailover(plannerNodeId());
+  });
+
+  source.addEventListener('node', (e) => handleNodeEvent(JSON.parse(e.data).message));
+
+  source.addEventListener('awaiting_approval', (e) => {
+    handleAwaitingApproval(JSON.parse(e.data));
+    source.close();
+  });
+
+  source.addEventListener('error', (e) => {
+    if (e.data) log(`<b style="color:#e05a5a">Error</b>: ${e.data}`);
+  });
+};
+</script>
+</body>
+</html>
