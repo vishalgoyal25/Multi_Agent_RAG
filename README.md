@@ -1,10 +1,11 @@
 # Multi-Agent RAG Research Platform
 
-> **Status: Phases 0–6 of 11 complete.** Core system (LLM client, retrieval, all four
-> agents, the graph, the API, and the live UI) is built and verified against real runs —
-> not just written, actually run and re-run until the evidence held up. Evaluation,
-> semantic caching, CI, and containerisation/final docs are still ahead. See
-> [Progress](#progress) below for the exact state of each phase.
+> **Status: Phases 0–7 of 11 complete.** Core system (LLM client, retrieval, all four
+> agents, the graph, the API, the live UI) is built and verified against real runs — and
+> it has now been formally scored: real RAGAS evaluation numbers are below. Semantic
+> caching, CI, and containerisation/final docs are still ahead. See
+> [Progress](#progress) for the exact state of each phase and [Evaluation
+> results](#evaluation-results) for the real numbers.
 
 A multi-agent research system that answers **complex, multi-step questions** over a
 document corpus — and shows its work live while doing it.
@@ -31,8 +32,8 @@ human-approval step, exactly as it looks in a browser.
 | 4 | Graph wiring — `Send` fan-out, bounded cycles, checkpointed HITL | ✅ |
 | 5 | API layer — FastAPI, SSE streaming, `/resume` | ✅ |
 | 6 | Live frontend — animated Cytoscape.js graph | ✅ |
-| 7 | Evaluation — RAGAS | ⬜ next |
-| 8 | Semantic cache — Redis | ⬜ |
+| 7 | Evaluation — real RAGAS scoring against a 6-question set | ✅ |
+| 8 | Semantic cache — Redis | ⬜ next |
 | 9 | CI — pytest + GitHub Actions | ⬜ |
 | 10 | Sample transcript, containerisation, final README | ⬜ |
 
@@ -43,6 +44,27 @@ bugs caught from actual screenshots), each root-caused from the actual installed
 rather than guessed. That process — and the full decision log — lives in this project's
 internal working notes, not published here; what's below is the durable, user-facing
 result.
+
+---
+
+## Evaluation results
+
+Real [RAGAS](https://docs.ragas.io) scoring, Groq-backed judge, against 6 real questions
+run through the actual live graph end to end — not a demo number.
+
+| Metric | Score |
+|---|---|
+| Faithfulness | **1.00** |
+| Answer relevancy | **0.93** |
+| Context precision | **0.83** |
+| Context recall | **0.83** |
+| Citation validity (deterministic, code-checked) | **6 / 6** |
+| Cheap-path misroute rate | **25%** (1 of 4 simple-path attempts needed escalation) |
+
+Scores exclude the 2 questions that correctly abstained (no claims to grade faithfulness
+against) — same evaluation set includes a deliberately uncovered question and the corpus's
+built-in factual conflict, both of which produced genuine abstains rather than confident
+guesses. Full per-question results: [`eval/results.json`](eval/results.json).
 
 ---
 
@@ -105,7 +127,7 @@ process restart, not just a hot-reload), and resumed by a separate approval call
 | Async Python throughout | `AsyncOpenAI`, async retrieval, async tracing | ✅ |
 | API service | FastAPI + Server-Sent Events + REST `/resume` | ✅ |
 | Live animated frontend | Self-contained Cytoscape.js page, no build step | ✅ |
-| Evaluation | RAGAS — faithfulness, answer relevancy, context precision/recall | ⬜ Phase 7 |
+| Evaluation | RAGAS — faithfulness, answer relevancy, context precision/recall, real scores above | ✅ |
 | Semantic caching | Redis, similarity-matched, cache hits visibly traced | ⬜ Phase 8 |
 | CI | `pytest` on deterministic units + GitHub Actions | ⬜ Phase 9 (tests exist and pass locally; wiring is what's left) |
 | Containerisation | Dockerfile + docker-compose | ⬜ Phase 10 |
@@ -125,7 +147,7 @@ process restart, not just a hot-reload), and resumed by a separate approval call
 - **API:** FastAPI + `sse-starlette`
 - **Frontend:** Cytoscape.js, single self-contained HTML page, no build toolchain
 - **Cache (Phase 8):** Redis
-- **Eval (Phase 7):** RAGAS
+- **Eval:** RAGAS 0.4.3 — real scores in [Evaluation results](#evaluation-results)
 
 ---
 
@@ -221,6 +243,14 @@ plain terminal output instead of the browser UI:
 python -m scripts.run_graph "How does the Growth tier's pricing compare to what the contract guarantees, and what happens if we exceed the data source limit?"
 ```
 
+### 7. A few other useful commands
+
+```bash
+pytest -v                    # run the automated test suite (pure, no API calls)
+python -m scripts.smoke_test # verify provider failover and tool calling work
+python -m eval.run_ragas     # score the system against RAGAS (real API calls, few min)
+```
+
 ---
 
 ## Corpus
@@ -276,6 +306,11 @@ not conceptual gain).
   but has not yet been observed firing on a live run — in every real attempt so far, the
   Synthesizer's own honesty checks caught the evidence gap first. Recorded as a real
   observation, not claimed as demonstrated.
+- The `abstained` flag is binary and can't represent a genuinely mixed response. One eval
+  question answered half its question with a real, valid citation while abstaining on the
+  other half; because abstained answers are excluded from scoring, that well-grounded half
+  was never evaluated. A real gap in the scoring model, named rather than smoothed over.
 
-A full **Known limitations** section — with real evaluation numbers — is added in Phase
-10, once the RAGAS harness (Phase 7) has run.
+A final, consolidated **Known limitations** section — with the completed RAGAS run above
+already folded in — is assembled in Phase 10, alongside the sample transcript and
+container setup.

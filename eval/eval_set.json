@@ -1,0 +1,41 @@
+{
+  "_comment": "Phase 7 eval set — deliberately small (D-13/Phase 7: rate limits are a real constraint, not keep the wall-clock manageable). Every question is real and checked against the actual corpus text before being added, not invented. `reference` is a ground-truth answer used only for ContextRecall (ragas.metrics.collections.ContextRecall requires one) and is intentionally null for questions with no single correct answer: 'conflict' has two genuinely contradictory sources (D-07), and 'uncovered' has no answer to reference at all. Faithfulness, AnswerRelevancy, and ContextPrecisionWithoutReference run on every question regardless — none of those three need a reference (verified against installed source before use, same discipline as D-15).",
+  "questions": [
+    {
+      "id": "q1",
+      "category": "covered_simple",
+      "question": "What is Northbay's urgent response time target for Growth tier customers?",
+      "reference": "4 hours, per the support and SLA policy's response time table for production-impacting issues on the Growth tier."
+    },
+    {
+      "id": "q2",
+      "category": "covered_simple",
+      "question": "How many distinct services does Northbay sell?",
+      "reference": "Five: AI Strategy, AI Studio Deployment, Agentic AI Development, FDE-Led Execution, and Integration & Governance."
+    },
+    {
+      "id": "q3",
+      "category": "covered_simple",
+      "question": "How many days does the standard onboarding runbook cover?",
+      "reference": "30 days, from kickoff through the standard onboarding sequence."
+    },
+    {
+      "id": "q4",
+      "category": "covered_multi_angle",
+      "question": "How does the Growth tier's pricing compare to what the contract guarantees, and what happens if we exceed the data source limit?",
+      "reference": null
+    },
+    {
+      "id": "q5",
+      "category": "conflict",
+      "question": "What is the trial length?",
+      "reference": null
+    },
+    {
+      "id": "q6",
+      "category": "uncovered",
+      "question": "How many employees does Northbay have, and what was its revenue last year?",
+      "reference": null
+    }
+  ]
+}

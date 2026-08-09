@@ -1,0 +1,116 @@
+{
+  "run_id": "4e304430",
+  "results": [
+    {
+      "id": "q1",
+      "category": "covered_simple",
+      "question": "What is Northbay's urgent response time target for Growth tier customers?",
+      "abstained": false,
+      "answer": "Northbay's urgent response time target for Growth tier customers is 4\u202fhours.",
+      "citations": [
+        "13_support_sla::0"
+      ],
+      "citation_check_passed": true,
+      "ever_took_simple_path": true,
+      "escalated": false,
+      "revised": false,
+      "scores": {
+        "faithfulness": 1.0,
+        "answer_relevancy": 0.9999999999999165,
+        "context_precision": 0.9999999999,
+        "context_recall": 1.0
+      }
+    },
+    {
+      "id": "q2",
+      "category": "covered_simple",
+      "question": "How many distinct services does Northbay sell?",
+      "abstained": false,
+      "answer": "Northbay sells five distinct services.",
+      "citations": [
+        "02_service_catalogue::0"
+      ],
+      "citation_check_passed": true,
+      "ever_took_simple_path": true,
+      "escalated": false,
+      "revised": false,
+      "scores": {
+        "faithfulness": 1.0,
+        "answer_relevancy": 0.9750003642473799,
+        "context_precision": 0.9999999999,
+        "context_recall": 0.5
+      }
+    },
+    {
+      "id": "q3",
+      "category": "covered_simple",
+      "question": "How many days does the standard onboarding runbook cover?",
+      "abstained": false,
+      "answer": "The standard onboarding runbook covers a 30\u2011day period.",
+      "citations": [
+        "14_onboarding_runbook::0",
+        "14_onboarding_runbook::2"
+      ],
+      "citation_check_passed": true,
+      "ever_took_simple_path": true,
+      "escalated": false,
+      "revised": false,
+      "scores": {
+        "faithfulness": 1.0,
+        "answer_relevancy": 0.8653838281826042,
+        "context_precision": 0.99999999995,
+        "context_recall": 1.0
+      }
+    },
+    {
+      "id": "q4",
+      "category": "covered_multi_angle",
+      "question": "How does the Growth tier's pricing compare to what the contract guarantees, and what happens if we exceed the data source limit?",
+      "abstained": true,
+      "answer": "I don't have enough information to compare the Growth tier's pricing to the contract guarantees, but I can say that exceeding the data source limit requires purchasing additional data source add\u2011ons billed per extra source each month.",
+      "citations": [
+        "09_pricing_tiers::1"
+      ],
+      "citation_check_passed": true,
+      "ever_took_simple_path": false,
+      "escalated": false,
+      "revised": false,
+      "scores": {}
+    },
+    {
+      "id": "q5",
+      "category": "conflict",
+      "question": "What is the trial length?",
+      "abstained": false,
+      "answer": "The documents disagree on the trial length. The pricing\u2011tier and marketing materials describe a 14\u2011day free trial, while the contract terms document specifies a 30\u2011day evaluation period, indicating a conflict between sources.",
+      "citations": [
+        "09_pricing_tiers::0",
+        "09_pricing_tiers::1",
+        "10_contract_trial_terms::0",
+        "10_contract_trial_terms::1"
+      ],
+      "citation_check_passed": true,
+      "ever_took_simple_path": true,
+      "escalated": true,
+      "revised": false,
+      "scores": {
+        "faithfulness": 1.0,
+        "answer_relevancy": 0.8811538534314346,
+        "context_precision": 0.3333333333
+      }
+    },
+    {
+      "id": "q6",
+      "category": "uncovered",
+      "question": "How many employees does Northbay have, and what was its revenue last year?",
+      "abstained": true,
+      "answer": "I couldn't find any information about Northbay's number of employees or its revenue from the provided research findings.",
+      "citations": [],
+      "citation_check_passed": true,
+      "ever_took_simple_path": false,
+      "escalated": false,
+      "revised": false,
+      "scores": {}
+    }
+  ]
+}

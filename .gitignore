@@ -32,8 +32,8 @@ checkpoints/
 *.sqlite3
 
 # --- Traces — the format is a deliverable, so one short sample is kept ---
-logs/*.jsonl
-!logs/sample_trace.jsonl
+# logs/*.jsonl
+# !logs/sample_trace.jsonl
 
 # --- Editor / OS noise ---
 .vscode/
