@@ -1,0 +1,36 @@
+# Brings up the app and its one runtime dependency (Redis, the semantic
+# cache) together. `docker compose up --build` is the entire Phase 10 exit
+# criterion: a working UI with no manual setup step.
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      # Overrides .env's localhost default (correct for running the app
+      # directly on the host) with the compose network's service name — the
+      # app container reaches Redis as "redis", not "localhost", since each
+      # container has its own network namespace.
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      - redis
+    volumes:
+      # Checkpoints and traces persist on the host across container restarts,
+      # same durability guarantee Phase 4/5 already proved for AsyncSqliteSaver
+      # — a container recreate should behave like the process-restart test did,
+      # not like MemorySaver silently losing everything.
+      - ./checkpoints:/app/checkpoints
+      - ./logs:/app/logs
+
+volumes:
+  redis_data:

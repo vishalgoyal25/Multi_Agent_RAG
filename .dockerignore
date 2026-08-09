@@ -1,0 +1,28 @@
+# Keeps the build context small and, more importantly, keeps host-machine
+# artifacts out of the image entirely — the Dockerfile rebuilds its own
+# data/chroma_db and data/chunks.json from docs/ (Phase 2's own "always
+# rebuilds from scratch" behavior), so a locally-built index never leaks in
+# and silently shadows that step.
+
+.venv/
+__pycache__/
+*.pyc
+
+.git/
+.github/
+
+# Secrets never belong in an image layer — docker-compose.yml injects real
+# values from the host's .env at container start instead.
+.env
+
+# Runtime artifacts, not build inputs. checkpoints/ and logs/ are mounted as
+# volumes by docker-compose.yml so they persist on the host across restarts.
+data/
+logs/
+checkpoints/
+
+*.pdf
+PHASES.md
+
+.pytest_cache/
+.mypy_cache/

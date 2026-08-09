@@ -1,14 +1,16 @@
 # Multi-Agent RAG Research Platform
 
-> **Status: Phases 0–9 of 11 complete.** Core system (LLM client, retrieval, all four
-> agents, the graph, the API, the live UI) is built and verified against real runs, it has
-> been formally scored with real RAGAS evaluation numbers, it sits behind a semantic cache
-> that always shows a cache hit as a cache hit, never as fresh work, and its deterministic
-> test suite now runs automatically on every push via GitHub Actions. Containerisation and
-> the final sample transcript are still ahead. See [Progress](#progress) for the exact
-> state of each phase, [Evaluation results](#evaluation-results) for the real numbers, and
-> [Two kinds of testing](#two-kinds-of-testing-and-why-ci-only-owns-one-of-them) for why CI
-> doesn't grade the RAGAS scores above.
+> **Status: all 11 phases complete.** Core system (LLM client, retrieval, all four agents,
+> the graph, the API, the live UI) is built and verified against real runs, formally scored
+> with real RAGAS evaluation numbers, sitting behind a semantic cache that always shows a
+> cache hit as a cache hit, never as fresh work, with a deterministic test suite that runs
+> automatically on every push via GitHub Actions. A real, unedited [sample
+> run](transcripts/sample_run.md) is committed, and `docker compose up --build` is
+> verified end-to-end — a full multi-agent run, human-approval included, completed inside
+> the container with zero manual setup step. See [Progress](#progress) for each phase,
+> [Evaluation results](#evaluation-results) for the real numbers, and [Two kinds of
+> testing](#two-kinds-of-testing-and-why-ci-only-owns-one-of-them) for why CI doesn't grade
+> the RAGAS scores above.
 
 A multi-agent research system that answers **complex, multi-step questions** over a
 document corpus — and shows its work live while doing it.
@@ -21,6 +23,11 @@ step streams to the browser as it happens, rendered as an animated node graph.
 **[See it running →](Multi-Agent%20RAG-Live%20Research%20Graph.pdf)** — a saved page
 capture of a real run: the animated graph mid-escalation, the live trace panel, and the
 human-approval step, exactly as it looks in a browser.
+
+**[Read a full run, step by step →](transcripts/sample_run.md)** — the real, unedited
+trace behind one question: the Planner's decision, both parallel Researchers, the
+Synthesizer's citations, the Critic's verdict, and the human-approval pause/resume, with
+every token count and timestamp copied straight from `logs/trace.jsonl`.
 
 ---
 
@@ -38,7 +45,7 @@ human-approval step, exactly as it looks in a browser.
 | 7 | Evaluation — real RAGAS scoring against a 6-question set | ✅ |
 | 8 | Semantic cache — Redis | ✅ |
 | 9 | CI — pytest + GitHub Actions | ✅ |
-| 10 | Sample transcript, containerisation, final README | ⬜ |
+| 10 | Sample transcript, containerisation, final README | ✅ |
 
 Each completed phase was closed only after real terminal/browser output confirmed it
 worked — not on assumption. Several real bugs were found and fixed along the way (a
@@ -163,7 +170,7 @@ process restart, not just a hot-reload), and resumed by a separate approval call
 | Evaluation | RAGAS — faithfulness, answer relevancy, context precision/recall, real scores above | ✅ |
 | Semantic caching | Redis, similarity-matched, cache hits visibly traced in the UI | ✅ |
 | CI | `pytest` on deterministic units, wired into GitHub Actions on every push/PR | ✅ |
-| Containerisation | Dockerfile + docker-compose | ⬜ Phase 10 |
+| Containerisation | Dockerfile + docker-compose, verified end-to-end with `docker compose up --build` | ✅ |
 
 ---
 
@@ -187,15 +194,47 @@ process restart, not just a hot-reload), and resumed by a separate approval call
 
 ## Setup
 
+Two ways to run this: **Docker Compose** (one command, nothing else to install) or a
+**manual venv setup** (more visibility into each step). Both need the same two free API
+keys either way.
+
+### Option A — Docker Compose (recommended)
+
+**Prerequisites:** Docker with the Compose V2 plugin (`docker compose version` should
+print a version, not an error — Docker Desktop bundles this; a bare Docker Engine install
+may not), and the two free API keys below.
+
+```bash
+git clone https://github.com/vishalgoyal25/Multi_Agent_RAG.git
+cd Multi_Agent_RAG
+cp .env.example .env    # Windows: copy .env.example .env
+```
+
+Open `.env` and paste in a [Groq](https://console.groq.com/keys) key and a
+[Cerebras](https://cloud.cerebras.ai) key (see [step 3](#3-configure-your-api-keys) below
+for the multi-key pool format). Then:
+
+```bash
+docker compose up --build
+```
+
+This builds the app image (baking in the retrieval index at build time — no separate
+indexing step), starts Redis alongside it, and serves the app at
+**http://127.0.0.1:8000**. `REDIS_URL` is pre-wired to the compose network; nothing else to
+configure. `checkpoints/` and `logs/` are mounted back to the host so they persist across
+restarts, same durability `docker compose down && docker compose up` should preserve as a
+plain restart does.
+
+### Option B — Manual setup (venv)
+
 ### Prerequisites
 
 - Python 3.11 or newer
 - A free [Groq](https://console.groq.com/keys) API key (primary)
 - A free [Cerebras](https://cloud.cerebras.ai) API key (failover)
-- A reachable Redis instance (local `docker run -d -p 6379:6379 redis` works fine) — the
-  semantic cache connects at startup and the app will fail to start without one
-- Docker is **not required yet** for the app itself — only once Phase 10's containerised
-  setup lands.
+- A reachable Redis instance (local `docker run -d -p 6379:6379 redis` works fine, or use
+  Option A above instead) — the semantic cache connects at startup and the app will fail
+  to start without one
 
 ### 1. Clone the repo
 
@@ -353,6 +392,11 @@ not conceptual gain).
   wrong cached answer as if it were freshly reasoned. Kept strict on purpose — a false
   cache hit is worse than a false miss — rather than tuned to chase one example.
 
-A final, consolidated **Known limitations** section — with the completed RAGAS run above
-already folded in — is assembled in Phase 10, alongside the sample transcript and
-container setup.
+This is the final, consolidated state of this section — all 11 phases are closed, and
+every limitation above was found and recorded during a real run, not anticipated in
+advance. A few things this project **cannot** claim, named plainly rather than implied:
+it is not deployed to a cloud provider (containerised and deployable as-is, but not
+actually deployed — a deliberate scope line, not an oversight), it uses Groq/Cerebras
+through an OpenAI-compatible client rather than Anthropic's or OpenAI's own API directly,
+and it is a portfolio-scale prototype against a synthetic corpus, not a system integrated
+into a real business process.
