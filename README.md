@@ -9,7 +9,7 @@ all of it happen live, node by node, in the browser.**
 Nothing below is aspirational; every checkmark in this README was confirmed against real
 terminal output, a real browser run, or a real scored evaluation before being marked done.
 
-[**▶ Watch it run**](Multi-Agent%20RAG-Live%20Research%20Graph.pdf) · [**📄 Read a full run, step by step**](transcripts/sample_run.md) · [**📊 Jump to evaluation results**](#evaluation-results) · [**⚙ Jump to setup**](#setup)
+[**▶ Watch it run**](Multi-Agent%20RAG-Live%20Research%20Graph.pdf) · [**📄 Read a full run, step by step**](transcripts/sample_run.md) · [**📊 Jump to evaluation results**](#evaluation-results) · [**⚙ Jump to setup**](#setup) · [**❓ Example questions**](#example-questions-to-explore)
 
 ---
 
@@ -504,6 +504,43 @@ Two ways to run this. **Docker is the fastest path** — one command, nothing el
 install. The manual path gives more visibility into each step. Both need the same two
 free API keys.
 
+> ### ⚠ Two hard requirements — read this before you start
+>
+> These aren't soft recommendations; skipping either one produces a real, confusing
+> failure, not a warning. Both are avoided automatically by **Option A (Docker)** below —
+> read this section closely only if you're using **Option B (manual)**.
+>
+> **1. Python 3.10 or newer — not just "preferred," a hard runtime requirement.**
+> This codebase uses modern union type syntax (`str | None`, and a `PendingApproval |
+> CacheHit` FastAPI response type) that Python's own interpreter and Pydantic/FastAPI
+> resolve **at runtime**, not just for static type-checking. On Python 3.9 or older, the
+> app fails immediately at startup with an obscure `TypeError` deep inside Pydantic —
+> not a clear "wrong Python version" message. Check your version **before** creating a
+> virtual environment:
+> ```bash
+> python3 --version
+> ```
+> If it's below 3.10, install a newer Python first — [python.org](https://www.python.org/downloads/)
+> on Windows, or on macOS: `brew install python@3.11` (Homebrew) or
+> `pyenv install 3.11 && pyenv local 3.11` (pyenv) — then make sure the venv in the next
+> section is created with that specific version, e.g. `python3.11 -m venv .venv`, not a
+> bare `python3` that may still resolve to an older system Python.
+>
+> **2. A running, reachable Redis — required for every question, not just caching.**
+> The app does *not* fail at startup if Redis is missing — it starts up looking completely
+> fine. The failure only appears the moment you ask a question: the browser shows
+> `Started`, and then **nothing else ever streams in** — no Planner, no researchers, no
+> answer, no visible error either. That silent hang is the signature symptom of an
+> unreachable Redis, not a frontend bug. Verify Redis is actually reachable before asking
+> anything:
+> ```bash
+> redis-cli -u redis://localhost:6379 ping
+> ```
+> A healthy Redis replies `PONG`. If that command isn't found or doesn't reply, start one
+> (`docker run -d -p 6379:6379 redis` works even if you're not using Option A for the rest
+> of the app), or point `REDIS_URL` in `.env` at a reachable instance — a free hosted
+> Redis (e.g. Redis Cloud, Upstash) works too, no local install required.
+
 ### Before either option: get your free API keys
 
 1. [Groq](https://console.groq.com/keys) — primary provider, free tier
@@ -573,9 +610,9 @@ stored cache).
 
 ### Option B — Manual setup (Python venv)
 
-**Prerequisite:** Python 3.11 or newer, and a reachable Redis instance. If you don't have
-one, the fastest option is `docker run -d -p 6379:6379 redis` — or just use Option A above
-instead, which handles Redis for you.
+**Prerequisite:** Python 3.10+ and a reachable Redis instance — **see the hard
+requirements callout above before continuing**; both failure modes look confusing if you
+skip straight to the commands below.
 
 **1. Clone the repo:**
 
@@ -632,24 +669,37 @@ Chunks and embeds the 15 documents in `docs/`, stores vectors, and writes a side
 the keyword index rebuilds from at startup. Re-run this any time `docs/` changes — it
 always rebuilds from scratch.
 
-**5. Start the server** (same command, any OS):
+**5. Confirm Redis is actually reachable — before starting the server, not after:**
+
+```bash
+redis-cli -u redis://localhost:6379 ping
+```
+
+Expect `PONG`. If this doesn't reply (or `redis-cli` isn't installed), start one now —
+`docker run -d -p 6379:6379 redis` — before continuing. Skipping this check is exactly
+what produces the "UI loads, `Started` appears, then nothing else happens" symptom in
+step 7 below.
+
+**6. Start the server** (same command, any OS):
 
 ```bash
 uvicorn app.api.main:app --reload
 ```
 
-**6. Open the app:** [**http://127.0.0.1:8000**](http://127.0.0.1:8000) — type a question
+**7. Open the app:** [**http://127.0.0.1:8000**](http://127.0.0.1:8000) — type a question
 and watch the graph build itself live. Try a simple factual question and a compound one;
-they visibly take different paths through the graph.
+they visibly take different paths through the graph. See [Example questions to
+explore](#example-questions-to-explore) below for a ready-made list covering every path
+through the graph.
 
-**7. (Optional) Run the standalone CLI demo instead** — including the human-approval
+**8. (Optional) Run the standalone CLI demo instead** — including the human-approval
 pause/resume, as plain terminal output rather than the browser UI:
 
 ```bash
 python -m scripts.run_graph "How does the Growth tier's pricing compare to what the contract guarantees, and what happens if we exceed the data source limit?"
 ```
 
-**8. A few other useful commands** (same on any OS, once the venv is active):
+**9. A few other useful commands** (same on any OS, once the venv is active):
 
 ```bash
 pytest -v                    # run the automated test suite (pure logic, no API calls)
@@ -657,6 +707,44 @@ python -m scripts.smoke_test # verify provider failover and tool calling work
 python -m eval.run_ragas     # score the system against RAGAS (real API calls, a few minutes)
 python -m scripts.test_cache # verify semantic cache hit/miss/bypass against real Redis
 ```
+
+---
+
+## Example questions to explore
+
+The system behaves differently depending on what you ask — these are grouped by which
+path through the agent graph each one is designed to exercise, so you can see the whole
+system rather than just one route through it. All are answerable (or correctly
+un-answerable) against the fictional Northbay Commerce AI corpus in `docs/`.
+
+**Simple / cheap path** (single fact, routed to one researcher, skips the Critic):
+1. What security certifications does Northbay hold for handling customer data?
+2. What is the typical timeline for completing customer onboarding?
+3. Which cloud providers does Northbay support for deployment?
+4. What response time does the support SLA guarantee for a high-severity ticket?
+5. What does the term "agentic template" mean in Northbay's glossary?
+
+**Multi-angle / compound** (should fan out into parallel researchers, then the Critic):
+6. How does the governance and observability approach differ between tiers, and what onboarding steps must a new customer complete before go-live?
+7. What does the retail case study say about deployment outcomes, and how does that compare to the security requirements described for data handling?
+8. What integration options exist for connecting external systems, and what support SLA applies once that integration goes live?
+
+**Built-in conflict** (the corpus deliberately disagrees with itself on trial length):
+9. If I sign up for a free trial today, exactly how many days do I get before I'm billed, according to Northbay's official terms?
+
+**Deliberately uncovered** (should trigger a genuine, honest abstain — not a guess):
+10. How many full-time employees does Northbay currently have?
+11. What was Northbay's total revenue last fiscal year?
+
+**Thin evidence** (aimed at the Critic — may trigger a revision, or a careful abstain):
+12. Exactly how many enterprise clients did the consumer-goods case study report measurable ROI for, and what was the average improvement percentage?
+
+**Looks simple, may need escalation** (a single fact that's actually two-part):
+13. What happens to my data after I cancel my subscription?
+
+Ask the exact same question twice in a row to see the **semantic cache** in action — the
+second answer returns in milliseconds with a distinct `⚡ Cache Hit` node, never disguised
+as a fresh run.
 
 ---
 
